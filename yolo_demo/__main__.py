@@ -21,8 +21,8 @@ from yolo_demo.mqtt import DummyMqttClient, MqttClient, PahoMqttClient
 COCO_CLASSES = [0]
 
 DEBUG = True
-# DEBUG_RTSP_STREAM = "rtsp://192.168.10.109:8554/live.sdp"
-DEBUG_RTSP_STREAM = "IMG_0327.jpg"
+DEBUG_RTSP_STREAM = "rtsp://192.168.10.109:8554/live.sdp"
+# DEBUG_RTSP_STREAM = "IMG_0327.jpg"
 DEBUG_MQTT_HOST = "localhost"
 # DEBUG_MQTT_HOST = "host.docker.internal"
 DEBUG_MQTT_PORT = 1883
@@ -50,7 +50,6 @@ DEBUG_DETECTION_AREA_POLYGON = Polygon(
 @dataclass
 class TrackingArea:
     tag: str
-    confidence_threshold: float
     polygon: Polygon
 
 
@@ -111,7 +110,6 @@ def detection_areas_from_json(s: str, /) -> list[TrackingArea]:
     return [
         TrackingArea(
             tag=d["tag"],
-            confidence_threshold=d["conf_thres"],
             polygon=Polygon(d["area"]),
         )
         for d in data
@@ -156,6 +154,7 @@ class AppConfig:
 
 def detect_and_track(rtsp_stream: str, coco_classes: list[int]) -> Iterator[Results]:
     """Detect and track objects in a video stream."""
+    # TODO: make this more fault tolerant when the stream is not available. Don't crash
     model = YOLO("yolov8n-seg.pt")
     if DEBUG:
         return model.track(
@@ -186,11 +185,6 @@ def analyze_results_and_publish(
                     continue
                 seen_objects.add(detected_object)
                 for detection_area in detection_areas:
-                    if (
-                        detected_object.detection_confidence
-                        < detection_area.confidence_threshold
-                    ):
-                        continue
                     if not area_contains_object(detection_area, detected_object):
                         continue
                     if (
@@ -210,7 +204,8 @@ def analyze_results_and_publish(
                         "detection_confidence": detected_object.detection_confidence,
                     }
                     mqtt_client.publish(
-                        f"{mqtt_root_topic}/{detection_area.tag}", json.dumps(message)
+                        f"{mqtt_root_topic}/{detection_area.tag}",
+                        json.dumps(message, indent=2),
                     )
 
         for tag, objects in detection_area_object_record.items():
@@ -224,7 +219,9 @@ def analyze_results_and_publish(
                         "class_name": detected_object.class_name,
                         "detection_confidence": detected_object.detection_confidence,
                     }
-                    mqtt_client.publish(f"{mqtt_root_topic}/{tag}", json.dumps(message))
+                    mqtt_client.publish(
+                        f"{mqtt_root_topic}/{tag}", json.dumps(message, indent=2)
+                    )
 
             objects.intersection_update(seen_objects)
 
@@ -237,11 +234,7 @@ if __name__ == "__main__":
             mqtt_port=DEBUG_MQTT_PORT,
             mqtt_topic=DEBUG_MQTT_TOPIC,
             tracking_areas=[
-                TrackingArea(
-                    DEBUG_DETECTION_AREA_TAG,
-                    DEBUG_DETECTION_AREA_CONFIDENCE_THRESHOLD,
-                    DEBUG_DETECTION_AREA_POLYGON,
-                )
+                TrackingArea(DEBUG_DETECTION_AREA_TAG, DEBUG_DETECTION_AREA_POLYGON)
             ],
         )
     else:
