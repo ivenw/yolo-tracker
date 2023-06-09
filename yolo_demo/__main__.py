@@ -21,34 +21,34 @@ from yolo_demo.mqtt import DummyMqttClient, MqttClient, PahoMqttClient
 COCO_CLASSES = [0]
 
 DEBUG = True
-DEBUG_RTSP_STREAM = "rtsp://192.168.10.109:8554/live.sdp"
-# DEBUG_RTSP_STREAM = "IMG_0327.jpg"
+# DEBUG_RTSP_STREAM = "rtsp://192.168.10.109:8554/live.sdp"
+DEBUG_RTSP_STREAM = "IMG_0327.jpg"
 DEBUG_MQTT_HOST = "localhost"
 # DEBUG_MQTT_HOST = "host.docker.internal"
 DEBUG_MQTT_PORT = 1883
 DEBUG_MQTT_TOPIC = "yolo"
 DEBUG_DETECTION_AREA_TAG = "test"
 DEBUG_DETECTION_AREA_CONFIDENCE_THRESHOLD = 0.5
-# DEBUG_DETECTION_AREA_POLYGON = Polygon(
-#     [
-#         (0.27, 0.77),
-#         (0.27, 1),
-#         (1, 1),
-#         (1, 0.77),
-#     ]
-# )
 DEBUG_DETECTION_AREA_POLYGON = Polygon(
     [
-        (0.0, 0.7),
-        (0.0, 1.0),
-        (1.0, 1.0),
-        (1.0, 0.7),
+        (0.27, 0.77),
+        (0.27, 1),
+        (1, 1),
+        (1, 0.77),
     ]
 )
+# DEBUG_DETECTION_AREA_POLYGON = Polygon(
+#     [
+#         (0.0, 0.7),
+#         (0.0, 1.0),
+#         (1.0, 1.0),
+#         (1.0, 0.7),
+#     ]
+# )
 
 
 @dataclass
-class DetectionArea:
+class TrackingArea:
     tag: str
     confidence_threshold: float
     polygon: Polygon
@@ -62,6 +62,17 @@ class DetectedObject:
     detection_confidence: float
     bounding_box_normalized: Union[Tensor, ndarray]
     segment_normalized: ndarray
+
+    def __eq__(self, o: object) -> bool:
+        if not isinstance(o, DetectedObject):
+            return False
+        return self.id == o.id
+
+    def __ne__(self, o: object) -> bool:
+        return not self.__eq__(o)
+
+    def __hash__(self) -> int:
+        return hash(self.id)
 
     @classmethod
     def from_box_mask_result(cls, box: Boxes, mask: Masks, result: Results) -> Self:
@@ -85,7 +96,7 @@ class DetectedObject:
 
 
 def area_contains_object(
-    detection_area: DetectionArea, detected_object: DetectedObject
+    detection_area: TrackingArea, detected_object: DetectedObject
 ) -> bool:
     """Check if a detection area contains a detected object.
 
@@ -95,10 +106,10 @@ def area_contains_object(
     return detection_area.polygon.contains(detected_object.max_segment_y_point)
 
 
-def detection_areas_from_json(s: str, /) -> list[DetectionArea]:
+def detection_areas_from_json(s: str, /) -> list[TrackingArea]:
     data = json.loads(s)
     return [
-        DetectionArea(
+        TrackingArea(
             tag=d["tag"],
             confidence_threshold=d["conf_thres"],
             polygon=Polygon(d["area"]),
@@ -113,7 +124,7 @@ class AppConfig:
     mqtt_host: str
     mqtt_port: int
     mqtt_topic: str
-    detection_areas: list[DetectionArea]
+    tracking_areas: list[TrackingArea]
 
     @classmethod
     def from_env(cls) -> Self:
@@ -139,7 +150,7 @@ class AppConfig:
             mqtt_host=mqtt_host,
             mqtt_port=int(mqtt_port),
             mqtt_topic=mqtt_topic,
-            detection_areas=detection_areas_from_json(detection_areas),
+            tracking_areas=detection_areas_from_json(detection_areas),
         )
 
 
@@ -148,7 +159,7 @@ def detect_and_track(rtsp_stream: str, coco_classes: list[int]) -> Iterator[Resu
     model = YOLO("yolov8n-seg.pt")
     if DEBUG:
         return model.track(
-            rtsp_stream, stream=True, verbose=False, classes=coco_classes, show=True
+            rtsp_stream, stream=True, verbose=False, classes=coco_classes, show=False
         )
 
     return model.track(rtsp_stream, stream=True, verbose=False, classes=coco_classes)
@@ -156,22 +167,24 @@ def detect_and_track(rtsp_stream: str, coco_classes: list[int]) -> Iterator[Resu
 
 def analyze_results_and_publish(
     results: Iterable[Results],
-    detection_areas: list[DetectionArea],
+    detection_areas: list[TrackingArea],
     mqtt_client: MqttClient,
     mqtt_root_topic: str,
 ) -> None:
-    detection_area_object_record = {k.tag: set() for k in detection_areas}
+    detection_area_object_record: dict[str, set[DetectedObject]] = {
+        k.tag: set() for k in detection_areas
+    }
 
     for result in results:
         detection_timestamp_ns = time.time_ns()
-        seen_objects = set()
+        seen_objects: set[DetectedObject] = set()
         if result.boxes and result.masks:
             for box, mask in zip(result.boxes, result.masks):  # type: ignore 'Boxes' and "Masks" don't implement '__iter__' but '__getitem__' is fallback
                 detected_object = DetectedObject.from_box_mask_result(box, mask, result)
 
                 if not detected_object.id:
                     continue
-                seen_objects.add(detected_object.id)
+                seen_objects.add(detected_object)
                 for detection_area in detection_areas:
                     if (
                         detected_object.detection_confidence
@@ -181,24 +194,37 @@ def analyze_results_and_publish(
                     if not area_contains_object(detection_area, detected_object):
                         continue
                     if (
-                        detected_object.id
+                        detected_object
                         in detection_area_object_record[detection_area.tag]
                     ):
                         continue
                     detection_area_object_record[detection_area.tag].add(
-                        detected_object.id
+                        detected_object
                     )
-
-                    print(
-                        f"Object {detected_object.id} detected in detection area {detection_area.tag} at {detection_timestamp_ns}"
+                    message = {
+                        "object_id": detected_object.id,
+                        "in_area": True,
+                        "timestamp": int(detection_timestamp_ns / 1e6),
+                        "class_id": detected_object.class_id,
+                        "class_name": detected_object.class_name,
+                        "detection_confidence": detected_object.detection_confidence,
+                    }
+                    mqtt_client.publish(
+                        f"{mqtt_root_topic}/{detection_area.tag}", json.dumps(message)
                     )
 
         for tag, objects in detection_area_object_record.items():
-            for id in objects:
-                if id not in seen_objects:
-                    print(
-                        f"Object {id} left detection area {tag} at {detection_timestamp_ns}"
-                    )
+            for detected_object in objects:
+                if detected_object not in seen_objects:
+                    message = {
+                        "object_id": detected_object.id,
+                        "in_area": False,
+                        "timestamp": int(detection_timestamp_ns / 1e6),
+                        "class_id": detected_object.class_id,
+                        "class_name": detected_object.class_name,
+                        "detection_confidence": detected_object.detection_confidence,
+                    }
+                    mqtt_client.publish(f"{mqtt_root_topic}/{tag}", json.dumps(message))
 
             objects.intersection_update(seen_objects)
 
@@ -210,8 +236,8 @@ if __name__ == "__main__":
             mqtt_host=DEBUG_MQTT_HOST,
             mqtt_port=DEBUG_MQTT_PORT,
             mqtt_topic=DEBUG_MQTT_TOPIC,
-            detection_areas=[
-                DetectionArea(
+            tracking_areas=[
+                TrackingArea(
                     DEBUG_DETECTION_AREA_TAG,
                     DEBUG_DETECTION_AREA_CONFIDENCE_THRESHOLD,
                     DEBUG_DETECTION_AREA_POLYGON,
@@ -230,5 +256,5 @@ if __name__ == "__main__":
     results = detect_and_track(app_config.rtsp_stream, coco_classes=COCO_CLASSES)
 
     analyze_results_and_publish(
-        results, app_config.detection_areas, mqtt_client, app_config.mqtt_topic
+        results, app_config.tracking_areas, mqtt_client, app_config.mqtt_topic
     )
