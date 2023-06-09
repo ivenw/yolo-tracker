@@ -1,0 +1,7 @@
+.ruff_cache/
+__pycache__/
+.DS_Store
+*.jpg
+*.jpeg
+*.png
+*.pt
