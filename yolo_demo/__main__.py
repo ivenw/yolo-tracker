@@ -18,7 +18,6 @@ from shapely.geometry import Polygon, Point
 
 from yolo_demo.mqtt import DummyMqttClient, MqttClient, PahoMqttClient
 
-COCO_CLASSES = [0]
 
 DEBUG = True
 DEBUG_RTSP_STREAM = "rtsp://192.168.10.109:8554/live.sdp"
@@ -152,83 +151,126 @@ class AppConfig:
         )
 
 
-def detect_and_track(rtsp_stream: str, coco_classes: list[int]) -> Iterator[Results]:
+def detect_and_track(rtsp_stream: str) -> Iterator[Results]:
     """Detect and track objects in a video stream."""
     # TODO: make this more fault tolerant when the stream is not available. Don't crash
     model = YOLO("yolov8n-seg.pt")
     if DEBUG:
         return model.track(
-            rtsp_stream, stream=True, verbose=False, classes=coco_classes, show=True
+            rtsp_stream, stream=True, verbose=False, classes=0, show=True
         )
 
-    return model.track(rtsp_stream, stream=True, verbose=False, classes=coco_classes)
+    return model.track(rtsp_stream, stream=True, verbose=False, classes=0)
+
+
+def filter_valid_objects_from_results(results: Results) -> Iterator[DetectedObject]:
+    if results.boxes and results.masks:
+        for box, mask in zip(results.boxes, results.masks):  # type: ignore fallback to '__get_item__'
+            object = DetectedObject.from_box_mask_result(box, mask, results)
+            if object.id is None:
+                continue
+            yield object
+
+
+def publish_event_message(
+    mqtt_client: MqttClient,
+    root_topic: str,
+    area: TrackingArea,
+    object: DetectedObject,
+    timestamp_sec: int,
+    in_area: bool,
+) -> None:
+    message = {
+        "object_id": object.id,
+        "in_area": in_area,
+        "timestamp_sec": timestamp_sec,
+        "class_id": object.class_id,
+        "class_name": object.class_name,
+        "detection_confidence": object.detection_confidence,
+    }
+    mqtt_client.publish(
+        f"{root_topic}/{area.tag}/events",
+        json.dumps(message, indent=2),
+    )
+
+
+def publish_count_message(
+    mqtt_client: MqttClient,
+    root_topic: str,
+    area: TrackingArea,
+    object_count: int,
+    timestamp_sec: int,
+) -> None:
+    message = {
+        "object_count": object_count,
+        "timestamp_sec": timestamp_sec,
+    }
+    mqtt_client.publish(
+        f"{root_topic}/{area.tag}/count",
+        json.dumps(message, indent=2),
+    )
 
 
 def analyze_results_and_publish(
-    results: Iterable[Results],
-    detection_areas: list[TrackingArea],
+    results_stream: Iterable[Results],
+    tracking_areas: list[TrackingArea],
     mqtt_client: MqttClient,
     mqtt_root_topic: str,
 ) -> None:
     object_record: dict[str, set[DetectedObject]] = {
-        k.tag: set() for k in detection_areas
+        k.tag: set() for k in tracking_areas
     }
+    object_count: dict[str, int] = {k.tag: 0 for k in tracking_areas}
 
-    for result in results:
-        detection_timestamp_ns = time.time_ns()
-
-        temp_object_record: dict[str, set[DetectedObject]] = {
-            k.tag: set() for k in detection_areas
+    for results in results_stream:
+        inference_timestamp_sec = int(time.time())
+        this_frame_object_record: dict[str, set[DetectedObject]] = {
+            k.tag: set() for k in tracking_areas
         }
 
-        if result.boxes and result.masks:
-            for box, mask in zip(result.boxes, result.masks):  # type: ignore 'Boxes' and "Masks" don't implement '__iter__' but '__getitem__' is fallback
-                object = DetectedObject.from_box_mask_result(box, mask, result)
-                if not object.id:
+        for object in filter_valid_objects_from_results(results):
+            for detection_area in tracking_areas:
+                if area_contains_object(detection_area, object) is False:
                     continue
+                this_frame_object_record[detection_area.tag].add(object)
 
-                for detection_area in detection_areas:
-                    object_in_area = area_contains_object(detection_area, object)
+                if object not in object_record[detection_area.tag]:
+                    object_record[detection_area.tag].add(object)
+                    publish_event_message(
+                        mqtt_client,
+                        mqtt_root_topic,
+                        detection_area,
+                        object,
+                        inference_timestamp_sec,
+                        in_area=True,
+                    )
 
-                    if not object_in_area:
-                        continue
-
-                    temp_object_record[detection_area.tag].add(object)
-
-                    if object not in object_record[detection_area.tag]:
-                        object_record[detection_area.tag].add(object)
-                        message = {
-                            "object_id": object.id,
-                            "in_area": True,
-                            "timestamp": int(detection_timestamp_ns / 1e6),
-                            "class_id": object.class_id,
-                            "class_name": object.class_name,
-                            "detection_confidence": object.detection_confidence,
-                        }
-                        mqtt_client.publish(
-                            f"{mqtt_root_topic}/{detection_area.tag}/events",
-                            json.dumps(message, indent=2),
-                        )
-
-        for detection_area in detection_areas:
+        for detection_area in tracking_areas:
             no_longer_in_area = object_record[detection_area.tag].difference(
-                temp_object_record[detection_area.tag]
+                this_frame_object_record[detection_area.tag]
             )
             object_record[detection_area.tag].intersection_update(
-                temp_object_record[detection_area.tag]
+                this_frame_object_record[detection_area.tag]
             )
             for object in no_longer_in_area:
-                message = {
-                    "object_id": object.id,
-                    "in_area": False,
-                    "timestamp": int(detection_timestamp_ns / 1e6),
-                    "class_id": object.class_id,
-                    "class_name": object.class_name,
-                    "detection_confidence": object.detection_confidence,
-                }
-                mqtt_client.publish(
-                    f"{mqtt_root_topic}/{detection_area.tag}/events",
-                    json.dumps(message, indent=2),
+                publish_event_message(
+                    mqtt_client,
+                    mqtt_root_topic,
+                    detection_area,
+                    object,
+                    inference_timestamp_sec,
+                    in_area=False,
+                )
+
+            this_frame_object_count = len(this_frame_object_record[detection_area.tag])
+            if this_frame_object_count != object_count[detection_area.tag]:
+                object_count[detection_area.tag] = this_frame_object_count
+                publish_count_message(
+                    mqtt_client,
+                    mqtt_root_topic,
+                    detection_area,
+                    this_frame_object_count,
+                    inference_timestamp_sec,
                 )
 
 
@@ -252,7 +294,7 @@ if __name__ == "__main__":
         mqtt_client = PahoMqttClient()
         mqtt_client.connect(app_config.mqtt_host, app_config.mqtt_port)
 
-    results = detect_and_track(app_config.rtsp_stream, coco_classes=COCO_CLASSES)
+    results = detect_and_track(app_config.rtsp_stream)
 
     analyze_results_and_publish(
         results, app_config.tracking_areas, mqtt_client, app_config.mqtt_topic
