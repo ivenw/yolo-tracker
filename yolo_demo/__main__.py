@@ -218,56 +218,55 @@ def analyze_results_and_publish(
     mqtt_client: MqttClient,
     mqtt_root_topic: str,
 ) -> None:
-    per_area_object_record: dict[str, set[DetectedObject]] = {
+    object_record: dict[str, set[DetectedObject]] = {
         k.tag: set() for k in tracking_areas
     }
-    per_area_object_count: dict[str, int] = {k.tag: 0 for k in tracking_areas}
 
-    for area, results in product(tracking_areas, results_stream):
+    for results in results_stream:
         inference_timestamp_sec = int(time.time())
-        previous_frame_object_record = per_area_object_record[area.tag]
-        this_frame_object_record: set[DetectedObject] = set()
+        for area in tracking_areas:
+            this_frame_object_record: set[DetectedObject] = set()
 
-        for object in filter_valid_objects_from_results(results):
-            if area_contains_object(area, object) is False:
-                continue
-            this_frame_object_record.add(object)
+            for object in filter_valid_objects_from_results(results):
+                if area_contains_object(area, object) is False:
+                    continue
+                this_frame_object_record.add(object)
 
-            if object not in previous_frame_object_record:
-                per_area_object_record[area.tag].add(object)
+                if object not in object_record[area.tag]:
+                    object_record[area.tag].add(object)
+                    publish_event_message(
+                        mqtt_client,
+                        mqtt_root_topic,
+                        area,
+                        object,
+                        inference_timestamp_sec,
+                        in_area=True,
+                    )
+
+            no_longer_in_area = object_record[area.tag].difference(
+                this_frame_object_record
+            )
+            object_record[area.tag].intersection_update(this_frame_object_record)
+            for object in no_longer_in_area:
                 publish_event_message(
                     mqtt_client,
                     mqtt_root_topic,
                     area,
                     object,
                     inference_timestamp_sec,
-                    in_area=True,
+                    in_area=False,
                 )
 
-        no_longer_in_area = previous_frame_object_record.difference(
-            this_frame_object_record
-        )
-        previous_frame_object_record.intersection_update(this_frame_object_record)
-        for object in no_longer_in_area:
-            publish_event_message(
-                mqtt_client,
-                mqtt_root_topic,
-                area,
-                object,
-                inference_timestamp_sec,
-                in_area=False,
-            )
-
-        this_frame_object_count = len(this_frame_object_record)
-        if this_frame_object_count != per_area_object_count[area.tag]:
-            per_area_object_count[area.tag] = this_frame_object_count
-            publish_count_message(
-                mqtt_client,
-                mqtt_root_topic,
-                area,
-                this_frame_object_count,
-                inference_timestamp_sec,
-            )
+            previous_frame_object_count = len(object_record[area.tag])
+            this_frame_object_count = len(this_frame_object_record)
+            if this_frame_object_count != previous_frame_object_count:
+                publish_count_message(
+                    mqtt_client,
+                    mqtt_root_topic,
+                    area,
+                    this_frame_object_count,
+                    inference_timestamp_sec,
+                )
 
 
 if __name__ == "__main__":
