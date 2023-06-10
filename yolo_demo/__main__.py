@@ -152,6 +152,47 @@ class AppConfig:
         )
 
 
+@dataclass
+class Publisher:
+    mqtt_client: MqttClient
+    root_topic: str
+
+    def publish_event_message(
+        self,
+        area: TrackingArea,
+        object: DetectedObject,
+        timestamp_sec: int,
+        in_area: bool,
+    ) -> None:
+        message = {
+            "object_id": object.id,
+            "in_area": in_area,
+            "timestamp_sec": timestamp_sec,
+            "class_id": object.class_id,
+            "class_name": object.class_name,
+            "detection_confidence": object.detection_confidence,
+        }
+        self.mqtt_client.publish(
+            f"{self.root_topic}/{area.tag}/events",
+            json.dumps(message, indent=2),
+        )
+
+    def publish_count_message(
+        self,
+        area: TrackingArea,
+        object_count: int,
+        timestamp_sec: int,
+    ) -> None:
+        message = {
+            "object_count": object_count,
+            "timestamp_sec": timestamp_sec,
+        }
+        self.mqtt_client.publish(
+            f"{self.root_topic}/{area.tag}/count",
+            json.dumps(message, indent=2),
+        )
+
+
 def detect_and_track(rtsp_stream: str) -> Iterator[Results]:
     """Detect and track objects in a video stream."""
     # TODO: make this more fault tolerant when the stream is not available. Don't crash
@@ -173,50 +214,10 @@ def filter_valid_objects_from_results(results: Results) -> Iterator[DetectedObje
             yield object
 
 
-def publish_event_message(
-    mqtt_client: MqttClient,
-    root_topic: str,
-    area: TrackingArea,
-    object: DetectedObject,
-    timestamp_sec: int,
-    in_area: bool,
-) -> None:
-    message = {
-        "object_id": object.id,
-        "in_area": in_area,
-        "timestamp_sec": timestamp_sec,
-        "class_id": object.class_id,
-        "class_name": object.class_name,
-        "detection_confidence": object.detection_confidence,
-    }
-    mqtt_client.publish(
-        f"{root_topic}/{area.tag}/events",
-        json.dumps(message, indent=2),
-    )
-
-
-def publish_count_message(
-    mqtt_client: MqttClient,
-    root_topic: str,
-    area: TrackingArea,
-    object_count: int,
-    timestamp_sec: int,
-) -> None:
-    message = {
-        "object_count": object_count,
-        "timestamp_sec": timestamp_sec,
-    }
-    mqtt_client.publish(
-        f"{root_topic}/{area.tag}/count",
-        json.dumps(message, indent=2),
-    )
-
-
 def analyze_results_and_publish(
     results_stream: Iterable[Results],
     tracking_areas: list[TrackingArea],
-    mqtt_client: MqttClient,
-    mqtt_root_topic: str,
+    publisher: Publisher,
 ) -> None:
     object_record: dict[str, set[DetectedObject]] = {
         k.tag: set() for k in tracking_areas
@@ -234,9 +235,7 @@ def analyze_results_and_publish(
 
                 if object not in object_record[area.tag]:
                     object_record[area.tag].add(object)
-                    publish_event_message(
-                        mqtt_client,
-                        mqtt_root_topic,
+                    publisher.publish_event_message(
                         area,
                         object,
                         inference_timestamp_sec,
@@ -248,9 +247,7 @@ def analyze_results_and_publish(
             )
             object_record[area.tag].intersection_update(this_frame_object_record)
             for object in no_longer_in_area:
-                publish_event_message(
-                    mqtt_client,
-                    mqtt_root_topic,
+                publisher.publish_event_message(
                     area,
                     object,
                     inference_timestamp_sec,
@@ -260,9 +257,7 @@ def analyze_results_and_publish(
             previous_frame_object_count = len(object_record[area.tag])
             this_frame_object_count = len(this_frame_object_record)
             if this_frame_object_count != previous_frame_object_count:
-                publish_count_message(
-                    mqtt_client,
-                    mqtt_root_topic,
+                publisher.publish_count_message(
                     area,
                     this_frame_object_count,
                     inference_timestamp_sec,
@@ -289,8 +284,7 @@ if __name__ == "__main__":
         mqtt_client = PahoMqttClient()
         mqtt_client.connect(app_config.mqtt_host, app_config.mqtt_port)
 
+    publisher = Publisher(mqtt_client, app_config.mqtt_topic)
     results = detect_and_track(app_config.rtsp_stream)
 
-    analyze_results_and_publish(
-        results, app_config.tracking_areas, mqtt_client, app_config.mqtt_topic
-    )
+    analyze_results_and_publish(results, app_config.tracking_areas, publisher)
