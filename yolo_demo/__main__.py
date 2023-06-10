@@ -29,22 +29,22 @@ DEBUG_MQTT_PORT = 1883
 DEBUG_MQTT_TOPIC = "yolo"
 DEBUG_DETECTION_AREA_TAG = "test"
 DEBUG_DETECTION_AREA_CONFIDENCE_THRESHOLD = 0.5
-DEBUG_DETECTION_AREA_POLYGON = Polygon(
-    [
-        (0.27, 0.77),
-        (0.27, 1),
-        (1, 1),
-        (1, 0.77),
-    ]
-)
 # DEBUG_DETECTION_AREA_POLYGON = Polygon(
 #     [
-#         (0.0, 0.7),
-#         (0.0, 1.0),
-#         (1.0, 1.0),
-#         (1.0, 0.7),
+#         (0.27, 0.77),
+#         (0.27, 1),
+#         (1, 1),
+#         (1, 0.77),
 #     ]
 # )
+DEBUG_DETECTION_AREA_POLYGON = Polygon(
+    [
+        (0.5, 0.0),
+        (1.0, 0.0),
+        (1.0, 1.0),
+        (0.5, 1.0),
+    ]
+)
 
 
 @dataclass
@@ -158,7 +158,7 @@ def detect_and_track(rtsp_stream: str, coco_classes: list[int]) -> Iterator[Resu
     model = YOLO("yolov8n-seg.pt")
     if DEBUG:
         return model.track(
-            rtsp_stream, stream=True, verbose=False, classes=coco_classes, show=False
+            rtsp_stream, stream=True, verbose=False, classes=coco_classes, show=True
         )
 
     return model.track(rtsp_stream, stream=True, verbose=False, classes=coco_classes)
@@ -170,60 +170,66 @@ def analyze_results_and_publish(
     mqtt_client: MqttClient,
     mqtt_root_topic: str,
 ) -> None:
-    detection_area_object_record: dict[str, set[DetectedObject]] = {
+    object_record: dict[str, set[DetectedObject]] = {
         k.tag: set() for k in detection_areas
     }
 
     for result in results:
         detection_timestamp_ns = time.time_ns()
-        seen_objects: set[DetectedObject] = set()
+
+        temp_object_record: dict[str, set[DetectedObject]] = {
+            k.tag: set() for k in detection_areas
+        }
+
         if result.boxes and result.masks:
             for box, mask in zip(result.boxes, result.masks):  # type: ignore 'Boxes' and "Masks" don't implement '__iter__' but '__getitem__' is fallback
-                detected_object = DetectedObject.from_box_mask_result(box, mask, result)
-
-                if not detected_object.id:
+                object = DetectedObject.from_box_mask_result(box, mask, result)
+                if not object.id:
                     continue
-                seen_objects.add(detected_object)
+
                 for detection_area in detection_areas:
-                    if not area_contains_object(detection_area, detected_object):
-                        continue
-                    if (
-                        detected_object
-                        in detection_area_object_record[detection_area.tag]
-                    ):
-                        continue
-                    detection_area_object_record[detection_area.tag].add(
-                        detected_object
-                    )
-                    message = {
-                        "object_id": detected_object.id,
-                        "in_area": True,
-                        "timestamp": int(detection_timestamp_ns / 1e6),
-                        "class_id": detected_object.class_id,
-                        "class_name": detected_object.class_name,
-                        "detection_confidence": detected_object.detection_confidence,
-                    }
-                    mqtt_client.publish(
-                        f"{mqtt_root_topic}/{detection_area.tag}",
-                        json.dumps(message, indent=2),
-                    )
+                    object_in_area = area_contains_object(detection_area, object)
 
-        for tag, objects in detection_area_object_record.items():
-            for detected_object in objects:
-                if detected_object not in seen_objects:
-                    message = {
-                        "object_id": detected_object.id,
-                        "in_area": False,
-                        "timestamp": int(detection_timestamp_ns / 1e6),
-                        "class_id": detected_object.class_id,
-                        "class_name": detected_object.class_name,
-                        "detection_confidence": detected_object.detection_confidence,
-                    }
-                    mqtt_client.publish(
-                        f"{mqtt_root_topic}/{tag}", json.dumps(message, indent=2)
-                    )
+                    if not object_in_area:
+                        continue
 
-            objects.intersection_update(seen_objects)
+                    temp_object_record[detection_area.tag].add(object)
+
+                    if object not in object_record[detection_area.tag]:
+                        object_record[detection_area.tag].add(object)
+                        message = {
+                            "object_id": object.id,
+                            "in_area": True,
+                            "timestamp": int(detection_timestamp_ns / 1e6),
+                            "class_id": object.class_id,
+                            "class_name": object.class_name,
+                            "detection_confidence": object.detection_confidence,
+                        }
+                        mqtt_client.publish(
+                            f"{mqtt_root_topic}/{detection_area.tag}/events",
+                            json.dumps(message, indent=2),
+                        )
+
+        for detection_area in detection_areas:
+            no_longer_in_area = object_record[detection_area.tag].difference(
+                temp_object_record[detection_area.tag]
+            )
+            object_record[detection_area.tag].intersection_update(
+                temp_object_record[detection_area.tag]
+            )
+            for object in no_longer_in_area:
+                message = {
+                    "object_id": object.id,
+                    "in_area": False,
+                    "timestamp": int(detection_timestamp_ns / 1e6),
+                    "class_id": object.class_id,
+                    "class_name": object.class_name,
+                    "detection_confidence": object.detection_confidence,
+                }
+                mqtt_client.publish(
+                    f"{mqtt_root_topic}/{detection_area.tag}/events",
+                    json.dumps(message, indent=2),
+                )
 
 
 if __name__ == "__main__":
