@@ -8,6 +8,7 @@ import numpy as np
 from numpy import ndarray
 from shapely.geometry import Point, Polygon
 from torch import Tensor
+from torch.cuda import is_available as cuda_is_available
 from typing_extensions import Self
 from ultralytics import YOLO
 from ultralytics.yolo.engine.results import Boxes, Masks, Results
@@ -168,12 +169,9 @@ def detect_and_track(rtsp_stream: str) -> Iterator[Results]:
     """Detect and track objects in a video stream."""
     # TODO: make this more fault tolerant when the stream is not available. Don't crash
     model = YOLO("yolov8n-seg.pt")
-    if DEBUG:
-        return model.track(
-            rtsp_stream, stream=True, verbose=False, classes=0, show=False
-        )
-
-    return model.track(rtsp_stream, stream=True, verbose=False, classes=0)
+    if cuda_is_available() is True:
+        return model.track(rtsp_stream, stream=True, verbose=False, classes=0, device=0)
+    return model.track(rtsp_stream, stream=True, verbose=False, classes=0, show=True)
 
 
 def filter_valid_objects_from_results(results: Results) -> Iterator[DetectedObject]:
