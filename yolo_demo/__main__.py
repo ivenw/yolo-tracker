@@ -3,6 +3,7 @@ import os
 import time
 from dataclasses import dataclass
 from typing import Iterable, Iterator, Optional, Union, cast
+import cv2
 
 import numpy as np
 from numpy import ndarray
@@ -15,7 +16,7 @@ from ultralytics.yolo.engine.results import Boxes, Masks, Results
 
 from yolo_demo.mqtt import DummyMqttClient, MqttClient, PahoMqttClient
 
-DEBUG = False
+DEBUG = True
 DEBUG_RTSP_STREAM = "rtsp://192.168.10.109:8554/live.sdp"
 # DEBUG_RTSP_STREAM = "IMG_0327.jpg"
 DEBUG_MQTT_HOST = "localhost"
@@ -209,6 +210,36 @@ def detection_areas_from_json(s: str, /) -> list[TrackingArea]:
     ]
 
 
+def annotate_tracking_areas(
+    frame: ndarray, tracking_areas: list[TrackingArea]
+) -> ndarray:
+    dimensions = frame.shape[:2][::-1]
+
+    # TODO: add text with area name
+    # TODO: cycle through colors for each area
+
+    for area in tracking_areas:
+        polygon = np.array(area.polygon.boundary.coords, np.float32)
+        polygon = np.multiply(polygon, dimensions).astype(np.int32)
+        cv2.polylines(
+            frame, pts=[polygon], isClosed=True, color=(0, 255, 0), thickness=2
+        )
+
+    return frame
+
+
+def annotate_object_tracking_position(
+    frame: ndarray, object: DetectedObject
+) -> ndarray:
+    ...
+
+
+def annotate_frame(result: Results, tracking_areas: list[TrackingArea]) -> None:
+    img = result.plot()
+    img = annotate_tracking_areas(img, tracking_areas)
+    cv2.imshow("annotated", img)
+
+
 def analyze_results_and_publish(
     results_stream: Iterable[Results],
     tracking_areas: list[TrackingArea],
@@ -259,6 +290,9 @@ def analyze_results_and_publish(
                     inference_timestamp_sec,
                 )
 
+        if DEBUG:
+            annotate_frame(results, tracking_areas)
+
 
 if __name__ == "__main__":
     if DEBUG:
@@ -291,3 +325,6 @@ if __name__ == "__main__":
     results = detect_and_track(app_config.rtsp_stream)
 
     analyze_results_and_publish(results, app_config.tracking_areas, publisher)
+
+    if DEBUG:
+        cv2.destroyAllWindows()
