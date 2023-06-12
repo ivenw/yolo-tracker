@@ -1,4 +1,3 @@
-from itertools import product
 from typing_extensions import Self
 
 from dataclasses import dataclass
