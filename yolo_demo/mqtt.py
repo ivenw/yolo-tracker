@@ -1,4 +1,4 @@
-from typing import Protocol
+from typing import Optional, Protocol
 
 from paho.mqtt.client import Client
 
@@ -21,5 +21,12 @@ class PahoMqttClient(MqttClient):
     def publish(self, topic: str, payload: str) -> None:
         self.client.publish(topic, payload)
 
-    def connect(self, host: str, port: int) -> None:
+    def connect(
+        self, host: str, port: int, username: Optional[str], password: Optional[str]
+    ) -> None:
+        if username is not None and password is not None:
+            self.client.username_pw_set(username, password)
+        elif username is not None:
+            self.client.username_pw_set(username)
+
         self.client.connect(host, port)

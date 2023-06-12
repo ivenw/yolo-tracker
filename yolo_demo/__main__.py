@@ -91,22 +91,24 @@ class DetectedObject:
 @dataclass
 class AppConfig:
     rtsp_stream: str
-    mqtt_host: str
+    mqtt_broker: str
     mqtt_port: int
     mqtt_topic: str
     tracking_areas: list[TrackingArea]
+    mqtt_user: Optional[str]
+    mqtt_password: Optional[str]
 
     @classmethod
     def from_env(cls) -> Self:
         rtsp_stream = os.getenv("RTSP_STREAM")
-        mqtt_host = os.getenv("MQTT_HOST")
+        mqtt_broker = os.getenv("MQTT_BROKER")
         mqtt_port = os.getenv("MQTT_PORT")
         mqtt_topic = os.getenv("MQTT_TOPIC")
         detection_areas = os.getenv("TRACKING_AREAS")
 
         if not rtsp_stream:
             raise ValueError("Environment variable 'RTSP_STREAM' is not set")
-        if not mqtt_host:
+        if not mqtt_broker:
             raise ValueError("Environment variable 'MQTT_HOST' is not set")
         if not mqtt_port:
             raise ValueError("Environment variable 'MQTT_PORT' is not set")
@@ -117,10 +119,12 @@ class AppConfig:
 
         return cls(
             rtsp_stream=rtsp_stream,
-            mqtt_host=mqtt_host,
+            mqtt_broker=mqtt_broker,
             mqtt_port=int(mqtt_port),
             mqtt_topic=mqtt_topic,
             tracking_areas=detection_areas_from_json(detection_areas),
+            mqtt_user=os.getenv("MQTT_USER"),
+            mqtt_password=os.getenv("MQTT_PASSWORD"),
         )
 
 
@@ -171,7 +175,7 @@ def detect_and_track(rtsp_stream: str) -> Iterator[Results]:
     model = YOLO("yolov8n-seg.pt")
     if cuda_is_available() is True:
         return model.track(rtsp_stream, stream=True, verbose=False, classes=0, device=0)
-    return model.track(rtsp_stream, stream=True, verbose=False, classes=0, show=True)
+    return model.track(rtsp_stream, stream=True, verbose=False, classes=0)
 
 
 def filter_valid_objects_from_results(results: Results) -> Iterator[DetectedObject]:
@@ -260,12 +264,14 @@ if __name__ == "__main__":
     if DEBUG:
         app_config = AppConfig(
             rtsp_stream=DEBUG_RTSP_STREAM,
-            mqtt_host=DEBUG_MQTT_HOST,
+            mqtt_broker=DEBUG_MQTT_HOST,
             mqtt_port=DEBUG_MQTT_PORT,
             mqtt_topic=DEBUG_MQTT_TOPIC,
             tracking_areas=[
                 TrackingArea(DEBUG_DETECTION_AREA_TAG, DEBUG_DETECTION_AREA_POLYGON)
             ],
+            mqtt_user=None,
+            mqtt_password=None,
         )
     else:
         app_config = AppConfig.from_env()
@@ -274,7 +280,12 @@ if __name__ == "__main__":
         mqtt_client = DummyMqttClient()
     else:
         mqtt_client = PahoMqttClient()
-        mqtt_client.connect(app_config.mqtt_host, app_config.mqtt_port)
+        mqtt_client.connect(
+            app_config.mqtt_broker,
+            app_config.mqtt_port,
+            app_config.mqtt_user,
+            app_config.mqtt_password,
+        )
 
     publisher = Publisher(mqtt_client, app_config.mqtt_topic)
     results = detect_and_track(app_config.rtsp_stream)
