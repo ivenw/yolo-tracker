@@ -8,16 +8,13 @@ packages = [{include = "yolo_demo"}]
 
 [tool.poetry.dependencies]
 python = "~3.9"
+ultralytics = "^8.0.116"
+paho-mqtt = "^1.6.1"
+shapely = "^2.0.1"
 torch = "^2.0.1"
 torchvision = "^0.15.2"
-ultralytics = "^8.0.114"
-paho-mqtt = "^1.6.1"
-numpy = "~1.21.0"
-lap = "^0.4.0"
-shapely = "^2.0.1"
-pafy = "^0.5.5"
-youtube-dl = "^2021.12.17"
 
+[tool.poetry.group.dev.dependencies]
 
 [build-system]
 requires = ["poetry-core"]

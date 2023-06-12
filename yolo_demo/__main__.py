@@ -1,29 +1,23 @@
-from typing_extensions import Self
-
+import json
+import os
+import time
 from dataclasses import dataclass
 from typing import Iterable, Iterator, Optional, Union, cast
-from ultralytics import YOLO
-from ultralytics.yolo.engine.results import Results, Boxes, Masks
-from torch import Tensor
-from numpy import ndarray
+
 import numpy as np
-
-import time
-
-
-import os
-import json
-
-from shapely.geometry import Polygon, Point
+from numpy import ndarray
+from shapely.geometry import Point, Polygon
+from torch import Tensor
+from typing_extensions import Self
+from ultralytics import YOLO
+from ultralytics.yolo.engine.results import Boxes, Masks, Results
 
 from yolo_demo.mqtt import DummyMqttClient, MqttClient, PahoMqttClient
 
-
-DEBUG = True
+DEBUG = False
 DEBUG_RTSP_STREAM = "rtsp://192.168.10.109:8554/live.sdp"
 # DEBUG_RTSP_STREAM = "IMG_0327.jpg"
 DEBUG_MQTT_HOST = "localhost"
-# DEBUG_MQTT_HOST = "host.docker.internal"
 DEBUG_MQTT_PORT = 1883
 DEBUG_MQTT_TOPIC = "yolo"
 DEBUG_DETECTION_AREA_TAG = "test"
@@ -93,28 +87,6 @@ class DetectedObject:
         return Point(point_coords[0][0], point_coords[0][1])
 
 
-def area_contains_object(
-    detection_area: TrackingArea, detected_object: DetectedObject
-) -> bool:
-    """Check if a detection area contains a detected object.
-
-    Assumes that detection area is in plane of an even floor and that the object is
-    standing on the floor.
-    """
-    return detection_area.polygon.contains(detected_object.max_segment_y_point)
-
-
-def detection_areas_from_json(s: str, /) -> list[TrackingArea]:
-    data = json.loads(s)
-    return [
-        TrackingArea(
-            tag=d["tag"],
-            polygon=Polygon(d["area"]),
-        )
-        for d in data
-    ]
-
-
 @dataclass
 class AppConfig:
     rtsp_stream: str
@@ -129,7 +101,7 @@ class AppConfig:
         mqtt_host = os.getenv("MQTT_HOST")
         mqtt_port = os.getenv("MQTT_PORT")
         mqtt_topic = os.getenv("MQTT_TOPIC")
-        detection_areas = os.getenv("DETECTION_AREAS")
+        detection_areas = os.getenv("TRACKING_AREAS")
 
         if not rtsp_stream:
             raise ValueError("Environment variable 'RTSP_STREAM' is not set")
@@ -140,7 +112,7 @@ class AppConfig:
         if not mqtt_topic:
             raise ValueError("Environment variable 'MQTT_TOPIC' is not set")
         if not detection_areas:
-            raise ValueError("Environment variable 'DETECTION_AREAS' is not set")
+            raise ValueError("Environment variable 'TRACKING_AREAS' is not set")
 
         return cls(
             rtsp_stream=rtsp_stream,
@@ -198,7 +170,7 @@ def detect_and_track(rtsp_stream: str) -> Iterator[Results]:
     model = YOLO("yolov8n-seg.pt")
     if DEBUG:
         return model.track(
-            rtsp_stream, stream=True, verbose=False, classes=0, show=True
+            rtsp_stream, stream=True, verbose=False, classes=0, show=False
         )
 
     return model.track(rtsp_stream, stream=True, verbose=False, classes=0)
@@ -213,6 +185,28 @@ def filter_valid_objects_from_results(results: Results) -> Iterator[DetectedObje
             yield object
 
 
+def area_contains_object(
+    detection_area: TrackingArea, detected_object: DetectedObject
+) -> bool:
+    """Check if a detection area contains a detected object.
+
+    Assumes that detection area is in plane of an even floor and that the object is
+    standing on the floor.
+    """
+    return detection_area.polygon.contains(detected_object.max_segment_y_point)
+
+
+def detection_areas_from_json(s: str, /) -> list[TrackingArea]:
+    data = json.loads(s)
+    return [
+        TrackingArea(
+            tag=d["tag"],
+            polygon=Polygon(d["area"]),
+        )
+        for d in data
+    ]
+
+
 def analyze_results_and_publish(
     results_stream: Iterable[Results],
     tracking_areas: list[TrackingArea],
@@ -225,6 +219,7 @@ def analyze_results_and_publish(
     for results in results_stream:
         inference_timestamp_sec = int(time.time())
         for area in tracking_areas:
+            previous_frame_object_count = len(object_record[area.tag])
             this_frame_object_record: set[DetectedObject] = set()
 
             for object in filter_valid_objects_from_results(results):
@@ -244,6 +239,7 @@ def analyze_results_and_publish(
             no_longer_in_area = object_record[area.tag].difference(
                 this_frame_object_record
             )
+
             object_record[area.tag].intersection_update(this_frame_object_record)
             for object in no_longer_in_area:
                 publisher.publish_event_message(
@@ -253,7 +249,6 @@ def analyze_results_and_publish(
                     in_area=False,
                 )
 
-            previous_frame_object_count = len(object_record[area.tag])
             this_frame_object_count = len(this_frame_object_record)
             if this_frame_object_count != previous_frame_object_count:
                 publisher.publish_count_message(
