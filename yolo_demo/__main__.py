@@ -138,13 +138,13 @@ class Publisher:
         self,
         area: TrackingArea,
         object: DetectedObject,
-        timestamp_sec: int,
+        unix_timestamp_sec: int,
         in_area: bool,
     ) -> None:
         message = {
             "object_id": object.id,
             "in_area": in_area,
-            "timestamp_sec": timestamp_sec,
+            "unix_timestamp_sec": unix_timestamp_sec,
             "class_id": object.class_id,
             "class_name": object.class_name,
             "detection_confidence": object.detection_confidence,
@@ -158,11 +158,11 @@ class Publisher:
         self,
         area: TrackingArea,
         object_count: int,
-        timestamp_sec: int,
+        unix_timestamp_sec: int,
     ) -> None:
         message = {
             "object_count": object_count,
-            "timestamp_sec": timestamp_sec,
+            "unix_timestamp_sec": unix_timestamp_sec,
         }
         self.mqtt_client.publish(
             f"{self.root_topic}/{area.tag}/count",
@@ -213,14 +213,14 @@ def detection_areas_from_json(s: str, /) -> list[TrackingArea]:
 def annotate_tracking_areas(
     frame: ndarray, tracking_areas: list[TrackingArea]
 ) -> ndarray:
-    dimensions = frame.shape[:2][::-1]
+    x_y_dimensions = frame.shape[:2][::-1]  # type: ignore
 
     # TODO: add text with area name
     # TODO: cycle through colors for each area
 
     for area in tracking_areas:
         polygon = np.array(area.polygon.boundary.coords, np.float32)
-        polygon = np.multiply(polygon, dimensions).astype(np.int32)
+        polygon = np.multiply(polygon, x_y_dimensions).astype(np.int32)
         cv2.polylines(
             frame, pts=[polygon], isClosed=True, color=(0, 255, 0), thickness=2
         )
@@ -250,7 +250,7 @@ def analyze_results_and_publish(
     }
 
     for results in results_stream:
-        inference_timestamp_sec = int(time.time())
+        unix_timestamp_sec = int(time.time())
         for area in tracking_areas:
             previous_frame_object_count = len(object_record[area.tag])
             this_frame_object_record: set[DetectedObject] = set()
@@ -265,7 +265,7 @@ def analyze_results_and_publish(
                     publisher.publish_event_message(
                         area,
                         object,
-                        inference_timestamp_sec,
+                        unix_timestamp_sec,
                         in_area=True,
                     )
 
@@ -278,7 +278,7 @@ def analyze_results_and_publish(
                 publisher.publish_event_message(
                     area,
                     object,
-                    inference_timestamp_sec,
+                    unix_timestamp_sec,
                     in_area=False,
                 )
 
@@ -287,7 +287,7 @@ def analyze_results_and_publish(
                 publisher.publish_count_message(
                     area,
                     this_frame_object_count,
-                    inference_timestamp_sec,
+                    unix_timestamp_sec,
                 )
 
         if DEBUG:
