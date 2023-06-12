@@ -5,13 +5,7 @@ WORKDIR /usr/src/app
 
 RUN apt update \
     && apt install --no-install-recommends -y libgl1 libglib2.0-0 g++
-    # && apt install --no-install-recommends -y libgl1-mesa-glx  libpython3-dev gnupg g++
-# RUN apt upgrade --no-install-recommends -y openssl tar
 
-# RUN python -m venv /opt/venv
-# ENV PATH="/opt/venv/bin:$PATH"
-
-# RUN pip install --no-cache nvidia-tensorrt --index-url https://pypi.ngc.nvidia.com
 COPY requirements.txt ./
 RUN pip install --no-cache -r requirements.txt
 
