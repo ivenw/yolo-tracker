@@ -1,7 +1,7 @@
 import json
 from dataclasses import dataclass
-import cv2
 
+import cv2
 import numpy as np
 
 from yolo_demo.mqtt import MqttClient

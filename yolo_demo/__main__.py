@@ -12,7 +12,7 @@ from ultralytics import YOLO
 from ultralytics.yolo.engine.results import Results
 
 from yolo_demo.annotation import FrameAnnotator
-from yolo_demo.mqtt import DummyMqttClient, MqttClient, PahoMqttClient
+from yolo_demo.mqtt import DummyMqttClient, PahoMqttClient
 from yolo_demo.publisher import Publisher
 from yolo_demo.tracking import DetectedObject, TrackingArea, area_contains_object
 
