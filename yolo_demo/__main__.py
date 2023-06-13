@@ -24,14 +24,6 @@ DEBUG_MQTT_PORT = 1883
 DEBUG_MQTT_TOPIC = "yolo"
 DEBUG_DETECTION_AREA_TAG = "test"
 DEBUG_DETECTION_AREA_CONFIDENCE_THRESHOLD = 0.5
-# DEBUG_DETECTION_AREA_POLYGON = Polygon(
-#     [
-#         (0.27, 0.77),
-#         (0.27, 1),
-#         (1, 1),
-#         (1, 0.77),
-#     ]
-# )
 DEBUG_DETECTION_AREA_POLYGON = Polygon(
     [
         (0.5, 0.0),
@@ -210,34 +202,55 @@ def detection_areas_from_json(s: str, /) -> list[TrackingArea]:
     ]
 
 
-def annotate_tracking_areas(
-    frame: ndarray, tracking_areas: list[TrackingArea]
-) -> ndarray:
-    x_y_dimensions = frame.shape[:2][::-1]  # type: ignore
+@dataclass
+class FrameAnnotator:
+    result: Results
 
-    # TODO: add text with area name
-    # TODO: cycle through colors for each area
+    def __post_init__(self) -> None:
+        self._frame = self.result.plot()
+        self._xy_dimensions = self._frame.shape[:2][::-1]  # type: ignore
 
-    for area in tracking_areas:
-        polygon = np.array(area.polygon.boundary.coords, np.float32)
-        polygon = np.multiply(polygon, x_y_dimensions).astype(np.int32)
-        cv2.polylines(
-            frame, pts=[polygon], isClosed=True, color=(0, 255, 0), thickness=2
-        )
+    def annotate_tracking_areas(self, tracking_areas: Iterable[TrackingArea]) -> Self:
+        # TODO: add text with area name
+        # TODO: cycle through colors for each area
+        for area in tracking_areas:
+            polygon = np.array(area.polygon.boundary.coords, np.float32)
+            polygon = np.multiply(polygon, self._xy_dimensions).astype(np.int32)
+            cv2.polylines(
+                self._frame,
+                pts=[polygon],
+                isClosed=True,
+                color=(0, 255, 0),
+                thickness=2,
+            )
+        return self
 
-    return frame
+    def annotate_object_tracking_position(
+        self, objects: Iterable[DetectedObject]
+    ) -> Self:
+        point_size = int(0.03 * self._xy_dimensions[0])
 
+        for object in objects:
+            point_coords = (
+                np.array(object.max_segment_y_point.coords, np.float32)
+                * self._xy_dimensions
+            ).astype(np.int32)[0]
+            cv2.circle(
+                self._frame,
+                center=point_coords,
+                radius=point_size,
+                color=(255, 0, 0),
+                thickness=-1,
+            )
+        return self
 
-def annotate_object_tracking_position(
-    frame: ndarray, object: DetectedObject
-) -> ndarray:
-    ...
+    def result_to_ndarray(self) -> ndarray:
+        return self._frame
 
-
-def annotate_frame(result: Results, tracking_areas: list[TrackingArea]) -> None:
-    img = result.plot()
-    img = annotate_tracking_areas(img, tracking_areas)
-    cv2.imshow("annotated", img)
+    def show(self) -> None:
+        cv2.imshow("annotated", self._frame)
+        if cv2.waitKey(1) == 27:  # ESC key
+            exit()
 
 
 def analyze_results_and_publish(
@@ -251,14 +264,17 @@ def analyze_results_and_publish(
 
     for results in results_stream:
         unix_timestamp_sec = int(time.time())
+        this_frame_detected_objects: list[DetectedObject] = []
+
         for area in tracking_areas:
             previous_frame_object_count = len(object_record[area.tag])
-            this_frame_object_record: set[DetectedObject] = set()
+            per_area_frame_object_record: set[DetectedObject] = set()
 
             for object in filter_valid_objects_from_results(results):
+                this_frame_detected_objects.append(object)
                 if area_contains_object(area, object) is False:
                     continue
-                this_frame_object_record.add(object)
+                per_area_frame_object_record.add(object)
 
                 if object not in object_record[area.tag]:
                     object_record[area.tag].add(object)
@@ -270,10 +286,10 @@ def analyze_results_and_publish(
                     )
 
             no_longer_in_area = object_record[area.tag].difference(
-                this_frame_object_record
+                per_area_frame_object_record
             )
 
-            object_record[area.tag].intersection_update(this_frame_object_record)
+            object_record[area.tag].intersection_update(per_area_frame_object_record)
             for object in no_longer_in_area:
                 publisher.publish_event_message(
                     area,
@@ -282,7 +298,7 @@ def analyze_results_and_publish(
                     in_area=False,
                 )
 
-            this_frame_object_count = len(this_frame_object_record)
+            this_frame_object_count = len(per_area_frame_object_record)
             if this_frame_object_count != previous_frame_object_count:
                 publisher.publish_count_message(
                     area,
@@ -291,10 +307,12 @@ def analyze_results_and_publish(
                 )
 
         if DEBUG:
-            annotate_frame(results, tracking_areas)
+            FrameAnnotator(results).annotate_tracking_areas(
+                tracking_areas
+            ).annotate_object_tracking_position(this_frame_detected_objects).show()
 
 
-if __name__ == "__main__":
+def main() -> None:
     if DEBUG:
         app_config = AppConfig(
             rtsp_stream=DEBUG_RTSP_STREAM,
@@ -328,3 +346,7 @@ if __name__ == "__main__":
 
     if DEBUG:
         cv2.destroyAllWindows()
+
+
+if __name__ == "__main__":
+    main()
