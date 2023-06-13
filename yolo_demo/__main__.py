@@ -3,8 +3,8 @@ import os
 import time
 from dataclasses import dataclass
 from typing import Iterable, Iterator, Optional, Union, cast
-import cv2
 
+import cv2
 import numpy as np
 from numpy import ndarray
 from shapely.geometry import Point, Polygon
@@ -14,7 +14,9 @@ from typing_extensions import Self
 from ultralytics import YOLO
 from ultralytics.yolo.engine.results import Boxes, Masks, Results
 
+from yolo_demo.annotation import FrameAnnotator
 from yolo_demo.mqtt import DummyMqttClient, MqttClient, PahoMqttClient
+from yolo_demo.tracking import DetectedObject, TrackingArea
 
 DEBUG = True
 # DEBUG_RTSP_STREAM = "rtsp://192.168.10.109:8554/live.sdp"
@@ -41,54 +43,6 @@ DEBUG_DETECTION_AREA_POLYGON = Polygon(
 #         (0.5, 1.0),
 #     ]
 # )
-
-
-@dataclass
-class TrackingArea:
-    tag: str
-    polygon: Polygon
-
-
-@dataclass
-class DetectedObject:
-    id: Optional[int]
-    class_id: int
-    class_name: str
-    detection_confidence: float
-    bounding_box_normalized: Union[Tensor, ndarray]
-    segment_normalized: ndarray
-
-    def __eq__(self, o: object) -> bool:
-        if not isinstance(o, DetectedObject):
-            return False
-        return self.id == o.id
-
-    def __ne__(self, o: object) -> bool:
-        return not self.__eq__(o)
-
-    def __hash__(self) -> int:
-        return hash(self.id)
-
-    @classmethod
-    def from_box_mask_result(cls, box: Boxes, mask: Masks, result: Results) -> Self:
-        class_id = int(cast(float, box.cls[0].tolist()))
-        return cls(
-            id=int(cast(float, box.id[0].tolist())) if box.id else None,
-            class_id=class_id,
-            class_name=result.names[class_id],
-            detection_confidence=cast(float, box.conf[0].tolist()),
-            bounding_box_normalized=box.xyxyn[0],  # type: ignore
-            segment_normalized=mask.xyn[0],
-        )
-
-    @property
-    def max_segment_y_point(self) -> Point:
-        # TODO: instead of a point, this should be a line between left and right most max y points
-        point_coords_idx = np.where(
-            self.segment_normalized == np.max(self.segment_normalized[:, 1])
-        )[0]
-        point_coords = self.segment_normalized[point_coords_idx]
-        return Point(point_coords[0][0], point_coords[0][1])
 
 
 @dataclass
@@ -210,79 +164,6 @@ def detection_areas_from_json(s: str, /) -> list[TrackingArea]:
         )
         for d in data
     ]
-
-
-@dataclass
-class FrameAnnotator:
-    result: Results
-
-    def __post_init__(self) -> None:
-        self._frame = self.result.plot()
-        self._xy_dimensions = self._frame.shape[:2][::-1]  # type: ignore
-
-    def annotate_tracking_areas(self, tracking_areas: Iterable[TrackingArea]) -> Self:
-        colors = [(0, 255, 0), (0, 0, 255), (255, 0, 0)]
-        line_thickness = int(0.003 * self._xy_dimensions[0])
-
-        for area, color in zip(tracking_areas, colors):
-            polygon = np.array(area.polygon.boundary.coords, np.float32)
-            polygon = np.multiply(polygon, self._xy_dimensions).astype(np.int32)
-            cv2.polylines(
-                self._frame,
-                pts=[polygon],
-                isClosed=True,
-                color=color,
-                thickness=line_thickness,
-            )
-            text = f"tag: {area.tag}"
-            # TODO: make this scale with image size
-            font_scale = 3
-            font_thickness = 5
-            text_width, text_height = cv2.getTextSize(
-                text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness
-            )[0]
-            # TODO: Place text at left bottom of polygon
-            p1 = polygon[0]
-            p2 = (polygon[0][0] + text_width, polygon[0][1] - text_height)
-            cv2.rectangle(self._frame, p1, p2, color, -1)
-            cv2.putText(
-                self._frame,
-                text=text,
-                org=polygon[0],
-                fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-                fontScale=3,
-                color=(255, 255, 255),
-                thickness=5,
-                lineType=cv2.LINE_AA,
-            )
-        return self
-
-    def annotate_object_tracking_position(
-        self, objects: Iterable[DetectedObject]
-    ) -> Self:
-        point_size = int(0.02 * self._xy_dimensions[0])
-
-        for object in objects:
-            point_coords = (
-                np.array(object.max_segment_y_point.coords, np.float32)
-                * self._xy_dimensions
-            ).astype(np.int32)[0]
-            cv2.circle(
-                self._frame,
-                center=point_coords,
-                radius=point_size,
-                color=(255, 0, 0),
-                thickness=-1,
-            )
-        return self
-
-    def result_to_ndarray(self) -> ndarray:
-        return self._frame
-
-    def show(self) -> None:
-        cv2.imshow("annotated", self._frame)
-        if cv2.waitKey(0) == 27:  # ESC key
-            exit()
 
 
 def analyze_results_and_publish(
