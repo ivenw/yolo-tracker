@@ -13,6 +13,7 @@ from ultralytics.yolo.engine.results import Results
 
 from yolo_demo.annotation import FrameAnnotator
 from yolo_demo.mqtt import DummyMqttClient, MqttClient, PahoMqttClient
+from yolo_demo.publisher import Publisher
 from yolo_demo.tracking import DetectedObject, TrackingArea, area_contains_object
 
 DEBUG = True
@@ -82,47 +83,6 @@ class AppConfig:
         )
 
 
-@dataclass
-class Publisher:
-    mqtt_client: MqttClient
-    root_topic: str
-
-    def publish_event_message(
-        self,
-        area: TrackingArea,
-        object: DetectedObject,
-        unix_timestamp_sec: int,
-        in_area: bool,
-    ) -> None:
-        message = {
-            "object_id": object.id,
-            "in_area": in_area,
-            "unix_timestamp_sec": unix_timestamp_sec,
-            "class_id": object.class_id,
-            "class_name": object.class_name,
-            "detection_confidence": object.detection_confidence,
-        }
-        self.mqtt_client.publish(
-            f"{self.root_topic}/{area.tag}/events",
-            json.dumps(message, indent=2),
-        )
-
-    def publish_count_message(
-        self,
-        area: TrackingArea,
-        object_count: int,
-        unix_timestamp_sec: int,
-    ) -> None:
-        message = {
-            "object_count": object_count,
-            "unix_timestamp_sec": unix_timestamp_sec,
-        }
-        self.mqtt_client.publish(
-            f"{self.root_topic}/{area.tag}/count",
-            json.dumps(message, indent=2),
-        )
-
-
 def detect_and_track(rtsp_stream: str) -> Iterator[Results]:
     """Detect and track objects in a video stream."""
     # TODO: make this more fault tolerant when the stream is not available. Don't crash
@@ -165,6 +125,7 @@ def analyze_results_and_publish(
     for results in results_stream:
         unix_timestamp_sec = int(time.time())
         this_frame_detected_objects: list[DetectedObject] = []
+        object_in_any_area = False
 
         for area in tracking_areas:
             previous_frame_object_count = len(object_record[area.tag])
@@ -174,6 +135,7 @@ def analyze_results_and_publish(
                 this_frame_detected_objects.append(object)
                 if area_contains_object(area, object) is False:
                     continue
+                object_in_any_area = True
                 per_area_frame_object_record.add(object)
 
                 if object not in object_record[area.tag]:
@@ -205,6 +167,15 @@ def analyze_results_and_publish(
                     this_frame_object_count,
                     unix_timestamp_sec,
                 )
+
+        if object_in_any_area is True:
+            image = (
+                FrameAnnotator(results)
+                .annotate_tracking_areas(tracking_areas)
+                .annotate_object_tracking_position(this_frame_detected_objects)
+                .to_ndarrary()
+            )
+            publisher.publish_snapshot(image, unix_timestamp_sec)
 
         if DEBUG:
             FrameAnnotator(results).annotate_tracking_areas(

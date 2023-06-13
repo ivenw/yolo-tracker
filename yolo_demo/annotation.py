@@ -73,7 +73,7 @@ class FrameAnnotator:
             )
         return self
 
-    def result_to_ndarray(self) -> np.ndarray:
+    def to_ndarrary(self) -> np.ndarray:
         return self._frame
 
     def show(self) -> None:
