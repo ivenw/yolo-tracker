@@ -1,5 +1,6 @@
 import json
 from dataclasses import dataclass
+from typing import cast
 
 import cv2
 import numpy as np
@@ -51,8 +52,7 @@ class Publisher:
     def publish_snapshot(
         self,
         image: np.ndarray,
-        unix_timestamp_sec: int,
     ) -> None:
-        image_jpeg = cv2.imencode(".jpg", image)[1].tobytes()
+        image_jpeg = cast(bytes, cv2.imencode(".jpg", image)[1].tobytes())
 
         self.mqtt_client.publish(f"{self.root_topic}/snapshot", image_jpeg)

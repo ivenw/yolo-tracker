@@ -175,7 +175,7 @@ def analyze_results_and_publish(
                 .annotate_object_tracking_position(this_frame_detected_objects)
                 .to_ndarrary()
             )
-            publisher.publish_snapshot(image, unix_timestamp_sec)
+            publisher.publish_snapshot(image)
 
         if DEBUG:
             FrameAnnotator(results).annotate_tracking_areas(
