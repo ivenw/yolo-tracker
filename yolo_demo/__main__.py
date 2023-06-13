@@ -17,8 +17,8 @@ from ultralytics.yolo.engine.results import Boxes, Masks, Results
 from yolo_demo.mqtt import DummyMqttClient, MqttClient, PahoMqttClient
 
 DEBUG = True
-DEBUG_RTSP_STREAM = "rtsp://192.168.10.109:8554/live.sdp"
-# DEBUG_RTSP_STREAM = "IMG_0327.jpg"
+# DEBUG_RTSP_STREAM = "rtsp://192.168.10.109:8554/live.sdp"
+DEBUG_RTSP_STREAM = "IMG_0327.jpg"
 DEBUG_MQTT_HOST = "localhost"
 DEBUG_MQTT_PORT = 1883
 DEBUG_MQTT_TOPIC = "yolo"
@@ -26,12 +26,21 @@ DEBUG_DETECTION_AREA_TAG = "test"
 DEBUG_DETECTION_AREA_CONFIDENCE_THRESHOLD = 0.5
 DEBUG_DETECTION_AREA_POLYGON = Polygon(
     [
-        (0.5, 0.0),
-        (1.0, 0.0),
+        (0.27, 0.76),
+        (0.77, 0.67),
+        (1.0, 0.88),
         (1.0, 1.0),
-        (0.5, 1.0),
+        (0.34, 1.0),
     ]
 )
+# DEBUG_DETECTION_AREA_POLYGON = Polygon(
+#     [
+#         (0.5, 0.0),
+#         (1.0, 0.0),
+#         (1.0, 1.0),
+#         (0.5, 1.0),
+#     ]
+# )
 
 
 @dataclass
@@ -68,12 +77,13 @@ class DetectedObject:
             class_id=class_id,
             class_name=result.names[class_id],
             detection_confidence=cast(float, box.conf[0].tolist()),
-            bounding_box_normalized=box.xyxyn[0],
+            bounding_box_normalized=box.xyxyn[0],  # type: ignore
             segment_normalized=mask.xyn[0],
         )
 
     @property
     def max_segment_y_point(self) -> Point:
+        # TODO: instead of a point, this should be a line between left and right most max y points
         point_coords_idx = np.where(
             self.segment_normalized == np.max(self.segment_normalized[:, 1])
         )[0]
@@ -211,24 +221,46 @@ class FrameAnnotator:
         self._xy_dimensions = self._frame.shape[:2][::-1]  # type: ignore
 
     def annotate_tracking_areas(self, tracking_areas: Iterable[TrackingArea]) -> Self:
-        # TODO: add text with area name
-        # TODO: cycle through colors for each area
-        for area in tracking_areas:
+        colors = [(0, 255, 0), (0, 0, 255), (255, 0, 0)]
+        line_thickness = int(0.003 * self._xy_dimensions[0])
+
+        for area, color in zip(tracking_areas, colors):
             polygon = np.array(area.polygon.boundary.coords, np.float32)
             polygon = np.multiply(polygon, self._xy_dimensions).astype(np.int32)
             cv2.polylines(
                 self._frame,
                 pts=[polygon],
                 isClosed=True,
-                color=(0, 255, 0),
-                thickness=2,
+                color=color,
+                thickness=line_thickness,
+            )
+            text = f"tag: {area.tag}"
+            # TODO: make this scale with image size
+            font_scale = 3
+            font_thickness = 5
+            text_width, text_height = cv2.getTextSize(
+                text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness
+            )[0]
+            # TODO: Place text at left bottom of polygon
+            p1 = polygon[0]
+            p2 = (polygon[0][0] + text_width, polygon[0][1] - text_height)
+            cv2.rectangle(self._frame, p1, p2, color, -1)
+            cv2.putText(
+                self._frame,
+                text=text,
+                org=polygon[0],
+                fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                fontScale=3,
+                color=(255, 255, 255),
+                thickness=5,
+                lineType=cv2.LINE_AA,
             )
         return self
 
     def annotate_object_tracking_position(
         self, objects: Iterable[DetectedObject]
     ) -> Self:
-        point_size = int(0.03 * self._xy_dimensions[0])
+        point_size = int(0.02 * self._xy_dimensions[0])
 
         for object in objects:
             point_coords = (
@@ -249,7 +281,7 @@ class FrameAnnotator:
 
     def show(self) -> None:
         cv2.imshow("annotated", self._frame)
-        if cv2.waitKey(1) == 27:  # ESC key
+        if cv2.waitKey(0) == 27:  # ESC key
             exit()
 
 
@@ -320,7 +352,10 @@ def main() -> None:
             mqtt_port=DEBUG_MQTT_PORT,
             mqtt_topic=DEBUG_MQTT_TOPIC,
             tracking_areas=[
-                TrackingArea(DEBUG_DETECTION_AREA_TAG, DEBUG_DETECTION_AREA_POLYGON)
+                TrackingArea(DEBUG_DETECTION_AREA_TAG, DEBUG_DETECTION_AREA_POLYGON),
+                TrackingArea(
+                    "test2", Polygon([(0.5, 0.0), (1.0, 0.0), (1.0, 1.0), (0.5, 1.0)])
+                ),
             ],
             mqtt_user=None,
             mqtt_password=None,
