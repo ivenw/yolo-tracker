@@ -56,14 +56,17 @@ class DetectedObject:
         return Point(point_coords[0][0], point_coords[0][1])
 
     @property
-    def feet_segment(self) -> Polygon:
-        percent_to_keep = 0.07
+    def feet_segment(self) -> Union[Polygon, None]:
+        percent_to_keep = 0.1
         min_y = np.min(self.segment_normalized[:, 1])
         max_y = np.max(self.segment_normalized[:, 1])
         relative_height = max_y - min_y
         min_y_cutoff = max_y - relative_height * percent_to_keep
         points_to_keep = np.where(self.segment_normalized[:, 1] > min_y_cutoff)
         feet_box_points = self.segment_normalized[points_to_keep]
+
+        if len(feet_box_points) < 3:
+            return None
 
         return Polygon(feet_box_points)
 
@@ -72,6 +75,9 @@ def object_intersects_area(
     object: DetectedObject, detection_area: TrackingArea
 ) -> bool:
     """Check if a detected object intersects a detection area."""
+    if object.feet_segment is None:
+        return False
+
     return object.feet_segment.intersects(detection_area.polygon)
 
 

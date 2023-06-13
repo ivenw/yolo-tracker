@@ -21,8 +21,9 @@ from yolo_demo.tracking import (
 )
 
 DEBUG = True
-DEBUG_RTSP_STREAM = "rtsp://192.168.10.109:8554/live.sdp"
+# DEBUG_RTSP_STREAM = "rtsp://192.168.10.109:8554/live.sdp"
 # DEBUG_RTSP_STREAM = "IMG_0327.jpg"
+DEBUG_RTSP_STREAM = "IMG_0332.MOV"
 DEBUG_MQTT_HOST = "localhost"
 DEBUG_MQTT_PORT = 1883
 DEBUG_MQTT_TOPIC = "yolo"
@@ -91,10 +92,17 @@ def detect_and_track(rtsp_stream: str) -> Iterator[Results]:
     """Detect and track objects in a video stream."""
     # TODO: make this more fault tolerant when the stream is not available. Don't crash
     model = YOLO("yolov8n-seg.pt")
+    track_config = {
+        "source": rtsp_stream,
+        "stream": True,
+        "verbose": False,
+        "classes": 0,
+        "conf": 0.6,
+    }
     if cuda_is_available() is True:
         print("Detected CUDA, using GPU for inference")
-        return model.track(rtsp_stream, stream=True, verbose=False, classes=0, device=0)
-    return model.track(rtsp_stream, stream=True, verbose=False, classes=0)
+        track_config["device"] = 0
+    return model.track(**track_config)
 
 
 def filter_valid_objects_from_results(results: Results) -> Iterator[DetectedObject]:
@@ -139,10 +147,10 @@ def analyze_results_and_publish(
                 this_frame_detected_objects.append(object)
                 if object_intersects_area(object, area) is False:
                     continue
-                object_in_any_area = True
                 per_area_frame_object_record.add(object)
 
                 if object not in object_record[area.tag]:
+                    object_in_any_area = True
                     object_record[area.tag].add(object)
                     publisher.publish_event_message(
                         area,
