@@ -97,7 +97,7 @@ def detect_and_track(rtsp_stream: str) -> Iterator[Results]:
         "stream": True,
         "verbose": False,
         "classes": 0,
-        "conf": 0.6,
+        "conf": 0.5,
     }
     if cuda_is_available() is True:
         print("Detected CUDA, using GPU for inference")
