@@ -58,6 +58,26 @@ class FrameAnnotator:
         self, objects: Iterable[DetectedObject]
     ) -> Self:
         point_size = int(0.02 * self._xy_dimensions[0])
+        line_thickness = int(0.003 * self._xy_dimensions[0])
+
+        for object in objects:
+            polygon = np.array(object.feet_segment.boundary.coords, np.float32)
+            polygon = np.multiply(polygon, self._xy_dimensions).astype(np.int32)
+            cv2.polylines(
+                self._frame,
+                pts=[polygon],
+                isClosed=True,
+                color=(0, 255, 0),
+                thickness=line_thickness,
+            )
+
+        return self
+
+    def annotate_object_tracking_position_legacy(
+        self, objects: Iterable[DetectedObject]
+    ) -> Self:
+        raise DeprecationWarning("Use annotate_object_tracking_position instead")
+        point_size = int(0.02 * self._xy_dimensions[0])
 
         for object in objects:
             point_coords = (
@@ -78,5 +98,5 @@ class FrameAnnotator:
 
     def show(self) -> None:
         cv2.imshow("annotated", self._frame)
-        if cv2.waitKey(0) == 27:  # ESC key
+        if cv2.waitKey(1) == 27:  # ESC key
             exit()

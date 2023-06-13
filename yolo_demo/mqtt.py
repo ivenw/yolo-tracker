@@ -1,18 +1,15 @@
-from typing import Optional, Protocol, Union
+from typing import Optional, Protocol
 
 from paho.mqtt.client import Client
 
 
-Payload = Union[str, bytes]
-
-
 class MqttClient(Protocol):
-    def publish(self, topic: str, payload: Payload) -> None:
+    def publish(self, topic: str, payload: str) -> None:
         ...
 
 
 class DummyMqttClient(MqttClient):
-    def publish(self, topic: str, payload: Payload) -> None:
+    def publish(self, topic: str, payload: str) -> None:
         del topic
         print(payload)
 
@@ -21,7 +18,7 @@ class PahoMqttClient(MqttClient):
     def __init__(self) -> None:
         self.client = Client()
 
-    def publish(self, topic: str, payload: Payload) -> None:
+    def publish(self, topic: str, payload: str) -> None:
         self.client.publish(topic, payload)
 
     def connect(

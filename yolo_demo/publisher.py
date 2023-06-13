@@ -1,3 +1,4 @@
+import base64
 import json
 from dataclasses import dataclass
 from typing import cast
@@ -52,7 +53,15 @@ class Publisher:
     def publish_snapshot(
         self,
         image: np.ndarray,
+        unix_timestamp_sec: int,
     ) -> None:
         image_jpeg = cast(bytes, cv2.imencode(".jpg", image)[1].tobytes())
 
-        self.mqtt_client.publish(f"{self.root_topic}/snapshot", image_jpeg)
+        message = {
+            "unix_timestamp_sec": unix_timestamp_sec,
+            "image": base64.b64encode(image_jpeg).decode("utf-8"),
+        }
+
+        self.mqtt_client.publish(
+            f"{self.root_topic}/snapshot", json.dumps(message, indent=2)
+        )

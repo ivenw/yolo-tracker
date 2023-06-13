@@ -14,11 +14,15 @@ from ultralytics.yolo.engine.results import Results
 from yolo_demo.annotation import FrameAnnotator
 from yolo_demo.mqtt import DummyMqttClient, PahoMqttClient
 from yolo_demo.publisher import Publisher
-from yolo_demo.tracking import DetectedObject, TrackingArea, area_contains_object
+from yolo_demo.tracking import (
+    DetectedObject,
+    TrackingArea,
+    object_intersects_area,
+)
 
 DEBUG = True
-# DEBUG_RTSP_STREAM = "rtsp://192.168.10.109:8554/live.sdp"
-DEBUG_RTSP_STREAM = "IMG_0327.jpg"
+DEBUG_RTSP_STREAM = "rtsp://192.168.10.109:8554/live.sdp"
+# DEBUG_RTSP_STREAM = "IMG_0327.jpg"
 DEBUG_MQTT_HOST = "localhost"
 DEBUG_MQTT_PORT = 1883
 DEBUG_MQTT_TOPIC = "yolo"
@@ -133,7 +137,7 @@ def analyze_results_and_publish(
 
             for object in filter_valid_objects_from_results(results):
                 this_frame_detected_objects.append(object)
-                if area_contains_object(area, object) is False:
+                if object_intersects_area(object, area) is False:
                     continue
                 object_in_any_area = True
                 per_area_frame_object_record.add(object)
@@ -175,7 +179,7 @@ def analyze_results_and_publish(
                 .annotate_object_tracking_position(this_frame_detected_objects)
                 .to_ndarrary()
             )
-            publisher.publish_snapshot(image)
+            publisher.publish_snapshot(image, unix_timestamp_sec)
 
         if DEBUG:
             FrameAnnotator(results).annotate_tracking_areas(

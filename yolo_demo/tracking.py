@@ -48,12 +48,31 @@ class DetectedObject:
 
     @property
     def max_segment_y_point(self) -> Point:
-        # TODO: instead of a point, this should be a line between left and right most max y points
+        raise DeprecationWarning("Will be removed in the future.")
         point_coords_idx = np.where(
             self.segment_normalized == np.max(self.segment_normalized[:, 1])
         )[0]
         point_coords = self.segment_normalized[point_coords_idx]
         return Point(point_coords[0][0], point_coords[0][1])
+
+    @property
+    def feet_segment(self) -> Polygon:
+        percent_to_keep = 0.07
+        min_y = np.min(self.segment_normalized[:, 1])
+        max_y = np.max(self.segment_normalized[:, 1])
+        relative_height = max_y - min_y
+        min_y_cutoff = max_y - relative_height * percent_to_keep
+        points_to_keep = np.where(self.segment_normalized[:, 1] > min_y_cutoff)
+        feet_box_points = self.segment_normalized[points_to_keep]
+
+        return Polygon(feet_box_points)
+
+
+def object_intersects_area(
+    object: DetectedObject, detection_area: TrackingArea
+) -> bool:
+    """Check if a detected object intersects a detection area."""
+    return object.feet_segment.intersects(detection_area.polygon)
 
 
 def area_contains_object(
@@ -64,4 +83,5 @@ def area_contains_object(
     Assumes that detection area is in plane of an even floor and that the object is
     standing on the floor.
     """
+    raise DeprecationWarning("Will be removed in the future.")
     return detection_area.polygon.contains(detected_object.max_segment_y_point)
