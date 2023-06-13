@@ -2,21 +2,18 @@ import json
 import os
 import time
 from dataclasses import dataclass
-from typing import Iterable, Iterator, Optional, Union, cast
+from typing import Iterable, Iterator, Optional
 
 import cv2
-import numpy as np
-from numpy import ndarray
-from shapely.geometry import Point, Polygon
-from torch import Tensor
+from shapely.geometry import Polygon
 from torch.cuda import is_available as cuda_is_available
 from typing_extensions import Self
 from ultralytics import YOLO
-from ultralytics.yolo.engine.results import Boxes, Masks, Results
+from ultralytics.yolo.engine.results import Results
 
 from yolo_demo.annotation import FrameAnnotator
 from yolo_demo.mqtt import DummyMqttClient, MqttClient, PahoMqttClient
-from yolo_demo.tracking import DetectedObject, TrackingArea
+from yolo_demo.tracking import DetectedObject, TrackingArea, area_contains_object
 
 DEBUG = True
 # DEBUG_RTSP_STREAM = "rtsp://192.168.10.109:8554/live.sdp"
@@ -131,6 +128,7 @@ def detect_and_track(rtsp_stream: str) -> Iterator[Results]:
     # TODO: make this more fault tolerant when the stream is not available. Don't crash
     model = YOLO("yolov8n-seg.pt")
     if cuda_is_available() is True:
+        print("Detected CUDA, using GPU for inference")
         return model.track(rtsp_stream, stream=True, verbose=False, classes=0, device=0)
     return model.track(rtsp_stream, stream=True, verbose=False, classes=0)
 
@@ -142,17 +140,6 @@ def filter_valid_objects_from_results(results: Results) -> Iterator[DetectedObje
             if object.id is None:
                 continue
             yield object
-
-
-def area_contains_object(
-    detection_area: TrackingArea, detected_object: DetectedObject
-) -> bool:
-    """Check if a detection area contains a detected object.
-
-    Assumes that detection area is in plane of an even floor and that the object is
-    standing on the floor.
-    """
-    return detection_area.polygon.contains(detected_object.max_segment_y_point)
 
 
 def detection_areas_from_json(s: str, /) -> list[TrackingArea]:

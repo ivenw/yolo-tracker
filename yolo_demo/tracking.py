@@ -54,3 +54,14 @@ class DetectedObject:
         )[0]
         point_coords = self.segment_normalized[point_coords_idx]
         return Point(point_coords[0][0], point_coords[0][1])
+
+
+def area_contains_object(
+    detection_area: TrackingArea, detected_object: DetectedObject
+) -> bool:
+    """Check if a detection area contains a detected object.
+
+    Assumes that detection area is in plane of an even floor and that the object is
+    standing on the floor.
+    """
+    return detection_area.polygon.contains(detected_object.max_segment_y_point)
