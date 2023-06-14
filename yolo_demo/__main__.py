@@ -20,7 +20,7 @@ from yolo_demo.tracking import (
     object_intersects_area,
 )
 
-DEBUG = os.getenv("DEBUG", 0)
+DEBUG = int(os.getenv("DEBUG", 0))
 
 
 @dataclass
