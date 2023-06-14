@@ -21,6 +21,7 @@ from yolo_demo.tracking import (
 )
 
 DEBUG = int(os.getenv("DEBUG", 0))
+HEADLESS = int(os.getenv("HEADLESS", 1))
 
 
 @dataclass
@@ -162,9 +163,10 @@ def analyze_results_and_publish(
                 .annotate_object_tracking_position(this_frame_detected_objects)
                 .to_ndarrary()
             )
-            publisher.publish_snapshot(image, unix_timestamp_sec)
+            if DEBUG == 0:
+                publisher.publish_snapshot(image, unix_timestamp_sec)
 
-        if DEBUG:
+        if DEBUG == 1 and HEADLESS == 0:
             FrameAnnotator(results).annotate_tracking_areas(
                 tracking_areas
             ).annotate_object_tracking_position(this_frame_detected_objects).show()
