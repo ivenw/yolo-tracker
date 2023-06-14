@@ -15,10 +15,4 @@ COPY yolo_demo ./yolo_demo
 EXPOSE 1883
 EXPOSE 8553
 
-ENV RTSP_STREAM="rtsp://192.168.10.109:8554/live.sdp"
-ENV MQTT_HOST="host.docker.internal"
-ENV MQTT_PORT="1883"
-ENV MQTT_TOPIC="yolo"
-ENV TRACKING_AREAS='[{"tag": "test", "area": [[0.5, 0.0], [1.0, 0.0], [1.0, 1.0], [0.5, 1.0]]}]'
-
 CMD ["python", "-m", "yolo_demo"]

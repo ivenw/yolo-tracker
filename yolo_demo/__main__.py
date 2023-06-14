@@ -20,32 +20,7 @@ from yolo_demo.tracking import (
     object_intersects_area,
 )
 
-DEBUG = True
-# DEBUG_RTSP_STREAM = "rtsp://192.168.10.109:8554/live.sdp"
-# DEBUG_RTSP_STREAM = "IMG_0327.jpg"
-DEBUG_RTSP_STREAM = "IMG_0332.MOV"
-DEBUG_MQTT_HOST = "localhost"
-DEBUG_MQTT_PORT = 1883
-DEBUG_MQTT_TOPIC = "yolo"
-DEBUG_DETECTION_AREA_TAG = "test"
-DEBUG_DETECTION_AREA_CONFIDENCE_THRESHOLD = 0.5
-DEBUG_DETECTION_AREA_POLYGON = Polygon(
-    [
-        (0.27, 0.76),
-        (0.77, 0.67),
-        (1.0, 0.88),
-        (1.0, 1.0),
-        (0.34, 1.0),
-    ]
-)
-# DEBUG_DETECTION_AREA_POLYGON = Polygon(
-#     [
-#         (0.5, 0.0),
-#         (1.0, 0.0),
-#         (1.0, 1.0),
-#         (0.5, 1.0),
-#     ]
-# )
+DEBUG = os.getenv("DEBUG", 0)
 
 
 @dataclass
@@ -69,7 +44,7 @@ class AppConfig:
         if not rtsp_stream:
             raise ValueError("Environment variable 'RTSP_STREAM' is not set")
         if not mqtt_broker:
-            raise ValueError("Environment variable 'MQTT_HOST' is not set")
+            raise ValueError("Environment variable 'MQTT_BROKER' is not set")
         if not mqtt_port:
             raise ValueError("Environment variable 'MQTT_PORT' is not set")
         if not mqtt_topic:
@@ -119,7 +94,7 @@ def detection_areas_from_json(s: str, /) -> list[TrackingArea]:
     return [
         TrackingArea(
             tag=d["tag"],
-            polygon=Polygon(d["area"]),
+            polygon=Polygon(d["polygon"]),
         )
         for d in data
     ]
@@ -196,25 +171,9 @@ def analyze_results_and_publish(
 
 
 def main() -> None:
-    if DEBUG:
-        app_config = AppConfig(
-            rtsp_stream=DEBUG_RTSP_STREAM,
-            mqtt_broker=DEBUG_MQTT_HOST,
-            mqtt_port=DEBUG_MQTT_PORT,
-            mqtt_topic=DEBUG_MQTT_TOPIC,
-            tracking_areas=[
-                TrackingArea(DEBUG_DETECTION_AREA_TAG, DEBUG_DETECTION_AREA_POLYGON),
-                TrackingArea(
-                    "test2", Polygon([(0.5, 0.0), (1.0, 0.0), (1.0, 1.0), (0.5, 1.0)])
-                ),
-            ],
-            mqtt_user=None,
-            mqtt_password=None,
-        )
-    else:
-        app_config = AppConfig.from_env()
+    app_config = AppConfig.from_env()
 
-    if DEBUG:
+    if DEBUG == 1:
         mqtt_client = DummyMqttClient()
     else:
         mqtt_client = PahoMqttClient()
