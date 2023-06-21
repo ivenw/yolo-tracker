@@ -17,6 +17,7 @@ from yolo_demo.publisher import Publisher
 from yolo_demo.tracking import (
     DetectedObject,
     TrackingArea,
+    area_contains_object,
     object_intersects_area,
 )
 
@@ -121,7 +122,7 @@ def analyze_results_and_publish(
 
             for object in filter_valid_objects_from_results(results):
                 this_frame_detected_objects.append(object)
-                if object_intersects_area(object, area) is False:
+                if area_contains_object(object, area) is False:
                     continue
                 per_area_frame_object_record.add(object)
 

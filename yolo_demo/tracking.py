@@ -82,12 +82,11 @@ def object_intersects_area(
 
 
 def area_contains_object(
-    detection_area: TrackingArea, detected_object: DetectedObject
+    detected_object: DetectedObject, detection_area: TrackingArea
 ) -> bool:
     """Check if a detection area contains a detected object.
 
     Assumes that detection area is in plane of an even floor and that the object is
     standing on the floor.
     """
-    raise DeprecationWarning("Will be removed in the future.")
-    return detection_area.polygon.contains(detected_object.max_segment_y_point)
+    return detection_area.polygon.contains(detected_object.feet_segment)
